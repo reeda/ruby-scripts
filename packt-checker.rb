@@ -1,39 +1,102 @@
 #!/usr/bin/ruby
 
-require 'faraday'
-require 'nokogiri'
+require 'mechanize'
+require 'highline/import'
+require 'yaml'
 
 home = ENV['HOME']
 
-filename = home + '/.packt_checker'
+filename = home + '/.packt_checker.yml'
 
-contents = []
+user_hash = {}
 
 if File.file? filename
-  f = File.open(filename, 'r') do |f|
-    f.each_line do |line|
-      contents << line.strip
-    end
+  user_hash = YAML.load_file(filename)
+else
+  if user_hash.empty?
+    user_hash[:email] = ask("Enter your Packt email:  ") { |q| q.echo = true }
+    user_hash[:password] = ask("Enter your password:  ") { |q| q.echo = "*" }
+    save = HighLine.agree("Save user details to '#{filename}'?")
+    if save
+      puts "OK. Saving to '#{filename}'"
+      File.open(filename, "w") do |file|
+        file.write user_hash.to_yaml
+      end
+    else
+      puts "OK. Not saving. You will be required to put your details again next time."
+    end 
   end
-  f.close
 end
 
-baseurl = 'https://www.packtpub.com'
-path = '/packt/offers/free-learning'
-client = Faraday.new(:url => baseurl)
+class PacktUserLogin
+  attr_accessor :email, :password
 
-html = client.get(path).body
-
-page = Nokogiri::HTML(html)
-
-title = page.css('div[class=dotd-title] h2')[0].text.strip
-
-if contents.include? title
-  print "No new free books\n"
-else
-  print "new free books at: #{baseurl + path}\n"
-  File.open(filename, 'a') do |f|
-    f.puts title
-    f.close
+  def initialize(user_hash)
+    @email = user_hash[:email]
+    @password = user_hash[:password]
   end
+
+  def login(m_agent)
+    m_agent.get('https://www.packtpub.com') do |p|
+      logged_in_page = p.form_with(id: 'packt-user-login-form') do |form|
+        form.email = @email
+        form.password = @password
+      end.click_button
+      logged_in_page
+    end
+  end
+end
+
+class PacktBook
+  attr_accessor :title
+   
+  def initialize(title)
+    @title = title
+  end
+
+  def eql?(other_book)
+    @title == other_book.title
+  end
+
+  def hash
+    @title.hash
+  end
+
+  def ==(other_book)
+    @title == other_book.title
+  end
+
+end
+
+module ListBooks
+  def self.list(login)
+    books = []
+    m_agent = Mechanize.new
+    logged_in_page = login.login(m_agent) 
+    account_page = m_agent.click(logged_in_page.link_with(text: /My Account/))
+    ebooks_page = m_agent.click(account_page.link_with(text: /My eBooks/))
+    ebooks_page.search(".title").each do |title|
+      books << PacktBook.new(title.text.sub('[eBook]', '').strip)
+    end
+    books
+  end
+
+  def self.free_book
+    m_agent = Mechanize.new
+    m_agent.get('https://www.packtpub.com/packt/offers/free-learning') do |p|
+      title = p.search('.dotd-title h2')[0].text.strip
+      return PacktBook.new(title)
+    end
+  end
+end
+
+u = PacktUserLogin.new(user_hash)
+books = ListBooks.list(u)
+
+free_book = ListBooks.free_book
+
+if books.include? free_book
+  puts "You already own the Deal of the Day: '#{free_book.title}'"
+else
+  puts "new book!"
 end
