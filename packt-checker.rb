@@ -36,8 +36,8 @@ class PacktUserLogin
     @password = user_hash[:password]
   end
 
-  def login(m_agent)
-    m_agent.get('https://www.packtpub.com') do |p|
+  def login(m_agent, url = 'https://www.packtpub.com')
+    m_agent.get(url) do |p|
       logged_in_page = p.form_with(id: 'packt-user-login-form') do |form|
         form.email = @email
         form.password = @password
@@ -68,7 +68,7 @@ class PacktBook
 
 end
 
-module ListBooks
+module WebBooks
   def self.list(login)
     books = []
     m_agent = Mechanize.new
@@ -88,15 +88,22 @@ module ListBooks
       return PacktBook.new(title)
     end
   end
+
+  def self.click_free_book(login)
+    m_agent = Mechanize.new
+    logged_in_page = login.login(m_agent, 'https://www.packtpub.com/packt/offers/free-learning')
+    m_agent.click(logged_in_page.link_with(href: /freelearning/))
+  end
 end
 
 u = PacktUserLogin.new(user_hash)
-books = ListBooks.list(u)
+books = WebBooks.list(u)
 
-free_book = ListBooks.free_book
+free_book = WebBooks.free_book
 
 if books.include? free_book
   puts "You already own the Deal of the Day: '#{free_book.title}'"
 else
-  puts "new book!"
+  puts "New Book: #{free_book.title}!"
+  WebBooks.click_free_book(u)
 end
