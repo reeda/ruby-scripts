@@ -3,6 +3,8 @@
 require 'mechanize'
 require 'highline/import'
 require 'yaml'
+require 'mailfactory'
+require 'net/smtp'
 
 home = ENV['HOME']
 
@@ -29,11 +31,12 @@ else
 end
 
 class PacktUserLogin
-  attr_accessor :email, :password
+  attr_accessor :email, :password, :smtp_password
 
   def initialize(user_hash)
     @email = user_hash[:email]
     @password = user_hash[:password]
+    @smtp_password = user_hash[:smtp_password]
   end
 
   def login(m_agent, url = 'https://www.packtpub.com')
@@ -96,6 +99,29 @@ module WebBooks
   end
 end
 
+module PacktMail
+
+  def self.send_mail(user, new_book)
+    mail = MailFactory.new()
+    mail.to = user.email
+    mail.from = "localhost"
+    mail.subject = "New Packt Book: #{new_book.title}"
+    mail.text = "Congratulation! You have a new Packt Book in your library: #{new_book.title}"
+    begin
+      fromaddress = 'localhost'
+      toaddress = user.email
+      smtp = Net::SMTP.new('smtp.gmail.com', 587)
+      smtp.enable_starttls
+      smtp.start('gmail.com', user.email, user.smtp_password, :login) { |smtp|
+        mail.to = toaddress
+        smtp.send_message(mail.to_s(), fromaddress, toaddress)
+      }
+    rescue Errno::ECONNREFUSED
+      puts 'Unable to send message. No SMTP Server. Skipping'
+    end
+  end
+end
+
 u = PacktUserLogin.new(user_hash)
 books = WebBooks.list(u)
 
@@ -106,4 +132,5 @@ if books.include? free_book
 else
   puts "New Book: #{free_book.title}!"
   WebBooks.click_free_book(u)
+  PacktMail.send_mail(u, free_book)
 end
